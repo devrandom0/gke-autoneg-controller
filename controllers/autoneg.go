@@ -65,22 +65,29 @@ func (s AutonegStatus) Backend(name string, port string, group string) compute.B
 
 	// Extract initial_capacity setting, if set
 	var capacityScaler float64 = 1
+	fmt.Printf("Backend() for %s/%s: Initial capacityScaler default: %f\n", name, port, capacityScaler)
 	if capacity := cfg.InitialCapacity; capacity != nil {
+		fmt.Printf("Backend() for %s/%s: InitialCapacity provided: %d\n", name, port, *capacity)
 		// This case should not be possible since validateNewConfig checks
 		// it, but leave the default setting of 100% if capacity is less
 		// than 0 or greater than 100
 		if *capacity >= int32(0) && *capacity <= int32(100) {
 			capacityScaler = float64(*capacity) / 100
+			fmt.Printf("Backend() for %s/%s: capacityScaler set from InitialCapacity: %f\n", name, port, capacityScaler)
 		}
 	}
 	if capacity := cfg.CapacityScaler; capacity != nil {
+		fmt.Printf("Backend() for %s/%s: CapacityScaler provided: %d\n", name, port, *capacity)
 		// This case should not be possible since validateNewConfig checks
 		// it, but leave the default setting of 100% if capacity is less
 		// than 0 or greater than 100
 		if *capacity >= int32(0) && *capacity <= int32(100) {
 			capacityScaler = float64(*capacity) / 100
+			fmt.Printf("Backend() for %s/%s: capacityScaler set from CapacityScaler: %f\n", name, port, capacityScaler)
 		}
 	}
+
+	fmt.Printf("Backend() for %s/%s: Final capacityScaler: %f\n", name, port, capacityScaler)
 
 	// Prefer the rate balancing mode if set
 	if cfg.Rate > 0 {
@@ -129,11 +136,17 @@ func (b *ProdBackendController) getBackendService(name string, region string) (s
 }
 
 func (b *ProdBackendController) updateBackends(name string, region string, svc *compute.BackendService, forceCapacity map[int]bool) error {
+	fmt.Printf("updateBackends(): Starting for %s (region: %s), backends: %d, forceCapacity entries: %d\n",
+		name, region, len(svc.Backends), len(forceCapacity))
 	if len(svc.Backends) == 0 {
+		fmt.Printf("updateBackends(): No backends, setting NullFields\n")
 		svc.NullFields = []string{"Backends"}
 	} else {
 		for beidx, be := range svc.Backends {
+			fmt.Printf("updateBackends(): Backend %d, group: %s, capacityScaler: %f\n",
+				beidx, be.Group, be.CapacityScaler)
 			if fc, ok := forceCapacity[beidx]; ok && fc {
+				fmt.Printf("updateBackends(): Forcing CapacityScaler for backend %d\n", beidx)
 				be.ForceSendFields = []string{"CapacityScaler"}
 			}
 		}
@@ -251,21 +264,39 @@ func (b *ProdBackendController) ReconcileBackends(actual, intended AutonegStatus
 				copy := true
 				for beidx, be := range newSvc.Backends {
 					if u.Group == be.Group {
+						fmt.Printf("ReconcileBackends(): Found existing backend for group %s, current capacityScaler: %f\n",
+							u.Group, be.CapacityScaler)
+						fmt.Printf("ReconcileBackends(): New backend values - MaxRatePerEndpoint: %f, MaxConnectionsPerEndpoint: %d, CapacityScaler: %f\n",
+							u.MaxRatePerEndpoint, u.MaxConnectionsPerEndpoint, u.CapacityScaler)
+
 						// TODO: copy fields explicitly
 						be.MaxRatePerEndpoint = u.MaxRatePerEndpoint
 						be.MaxConnectionsPerEndpoint = u.MaxConnectionsPerEndpoint
 						if intended.AutonegSyncConfig != nil {
 							var syncConfig AutonegSyncConfig = *intended.AutonegSyncConfig
-							if syncConfig.CapacityScaler != nil && *syncConfig.CapacityScaler == true {
-								be.CapacityScaler = u.CapacityScaler
-								forceCapacity[beidx] = true
+							fmt.Printf("ReconcileBackends(): SyncConfig: %+v\n", syncConfig)
+							if syncConfig.CapacityScaler != nil {
+								fmt.Printf("ReconcileBackends(): CapacityScaler sync flag: %v\n", *syncConfig.CapacityScaler)
+								if *syncConfig.CapacityScaler == true {
+									fmt.Printf("ReconcileBackends(): Setting capacity scaler for group %s from %f to: %f\n",
+										u.Group, be.CapacityScaler, u.CapacityScaler)
+									be.CapacityScaler = u.CapacityScaler
+									forceCapacity[beidx] = true
+									fmt.Printf("ReconcileBackends(): Set forceCapacity[%d] = true\n", beidx)
+								}
 							}
 						} else {
+							fmt.Printf("ReconcileBackends(): No SyncConfig provided\n")
 							// Force CapacityScaler to an "empty value"
+							fmt.Printf("ReconcileBackends(): Before forcing, u.CapacityScaler = %f\n", u.CapacityScaler)
 							u.CapacityScaler = 0
+							fmt.Printf("ReconcileBackends(): After forcing, u.CapacityScaler = %f\n", u.CapacityScaler)
+
 							// Check if existing capacity scaler is zero
 							if be.CapacityScaler == 0 {
+								fmt.Printf("ReconcileBackends(): Existing capacityScaler is already 0, forcing send\n")
 								forceCapacity[beidx] = true
+								fmt.Printf("ReconcileBackends(): Set forceCapacity[%d] = true\n", beidx)
 							}
 						}
 						copy = false
@@ -485,9 +516,18 @@ func getStatuses(namespace string, name string, annotations map[string]string, r
 		}
 
 		tmpSync, syncOk := annotations[autonegSyncAnnotation]
+		fmt.Printf("Raw sync annotation: %s (exists: %v)\n", tmpSync, syncOk)
 		if syncOk {
-			if err = json.Unmarshal([]byte(tmpSync), &s.syncConfig); err != nil {
+			fmt.Printf("Attempting to unmarshal sync annotation: %s\n", tmpSync)
+			err = json.Unmarshal([]byte(tmpSync), &s.syncConfig) // Changed := to =
+			if err != nil {
+				fmt.Printf("Error unmarshaling sync annotation: %v\n", err)
 				return
+			} else {
+				fmt.Printf("Unmarshaled sync config: %+v\n", s.syncConfig)
+				if s.syncConfig.CapacityScaler != nil {
+					fmt.Printf("CapacityScaler value: %v\n", *s.syncConfig.CapacityScaler)
+				}
 			}
 		}
 
