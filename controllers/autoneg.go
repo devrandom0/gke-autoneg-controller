@@ -314,6 +314,29 @@ func (b *ProdBackendController) ReconcileBackends(actual, intended AutonegStatus
 					newSvc.Backends = append(newSvc.Backends, &newBackend)
 				}
 			}
+			fmt.Println("========== Intended Backends ==========")
+			for port, services := range intended.BackendServices {
+				for svcName, svcConfig := range services {
+					fmt.Printf("Port: %s, Service: %s, Region: %s\n", port, svcName, svcConfig.Region)
+					// Get all NEG groups for this port
+					if negs, ok := intended.NEGs[port]; ok {
+						for _, zone := range intended.Zones {
+							group := getGroup(b.project, zone, negs)
+							fmt.Printf("  - NEG: %s\n", group)
+
+							// Print backend configuration details
+							backend := intended.Backend(svcName, port, group)
+							fmt.Printf("    BalancingMode: %s, CapacityScaler: %f\n",
+								backend.BalancingMode, backend.CapacityScaler)
+							if backend.BalancingMode == "RATE" {
+								fmt.Printf("    MaxRatePerEndpoint: %f\n", backend.MaxRatePerEndpoint)
+							} else {
+								fmt.Printf("    MaxConnectionsPerEndpoint: %d\n", backend.MaxConnectionsPerEndpoint)
+							}
+						}
+					}
+				}
+			}
 			if len(upsert.backends) > 0 {
 				err = b.updateBackends(upsert.name, upsert.region, newSvc, forceCapacity)
 			}
