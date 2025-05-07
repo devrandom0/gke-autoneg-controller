@@ -281,7 +281,7 @@ func (b *ProdBackendController) ReconcileBackends(actual, intended AutonegStatus
 									fmt.Printf("ReconcileBackends(): Setting capacity scaler for group %s from %f to: %f\n",
 										u.Group, be.CapacityScaler, u.CapacityScaler)
 									be.CapacityScaler = u.CapacityScaler
-									forceCapacity[beidx] = true
+									// forceCapacity[beidx] = true // no need this is already set
 									fmt.Printf("ReconcileBackends(): Set forceCapacity[%d] = true\n", beidx)
 								}
 							}
@@ -292,12 +292,12 @@ func (b *ProdBackendController) ReconcileBackends(actual, intended AutonegStatus
 							u.CapacityScaler = 0
 							fmt.Printf("ReconcileBackends(): After forcing, u.CapacityScaler = %f\n", u.CapacityScaler)
 
-							// Check if existing capacity scaler is zero
-							if be.CapacityScaler == 0 {
-								fmt.Printf("ReconcileBackends(): Existing capacityScaler is already 0, forcing send\n")
-								forceCapacity[beidx] = true
-								fmt.Printf("ReconcileBackends(): Set forceCapacity[%d] = true\n", beidx)
-							}
+							// // Check if existing capacity scaler is zero
+							// if be.CapacityScaler == 0 {
+							// 	fmt.Printf("ReconcileBackends(): Existing capacityScaler is already 0, forcing send\n")
+							// 	forceCapacity[beidx] = true
+							// 	fmt.Printf("ReconcileBackends(): Set forceCapacity[%d] = true\n", beidx)
+							// }
 						}
 						copy = false
 						break
@@ -314,10 +314,17 @@ func (b *ProdBackendController) ReconcileBackends(actual, intended AutonegStatus
 					newSvc.Backends = append(newSvc.Backends, &newBackend)
 				}
 			}
+			for beidx, be := range newSvc.Backends {
+				// if intended.AutonegSyncConfig != nil && be.CapacityScaler == 0 {
+				if be.CapacityScaler == 0 {
+					fmt.Printf("ReconcileBackends(): Found backend with zero capacityScaler, setting forceCapacity[%d] = true\n", beidx)
+					forceCapacity[beidx] = true
+				}
+			}
 			fmt.Println("========== Intended Backends ==========")
 			for port, services := range intended.BackendServices {
-				for svcName, svcConfig := range services {
-					fmt.Printf("Port: %s, Service: %s, Region: %s\n", port, svcName, svcConfig.Region)
+				for svcName, _ := range services {
+					fmt.Printf("Port: %s, Service: %s\n", port, svcName)
 					// Get all NEG groups for this port
 					if negs, ok := intended.NEGs[port]; ok {
 						for _, zone := range intended.Zones {
@@ -326,17 +333,12 @@ func (b *ProdBackendController) ReconcileBackends(actual, intended AutonegStatus
 
 							// Print backend configuration details
 							backend := intended.Backend(svcName, port, group)
-							fmt.Printf("    BalancingMode: %s, CapacityScaler: %f\n",
-								backend.BalancingMode, backend.CapacityScaler)
-							if backend.BalancingMode == "RATE" {
-								fmt.Printf("    MaxRatePerEndpoint: %f\n", backend.MaxRatePerEndpoint)
-							} else {
-								fmt.Printf("    MaxConnectionsPerEndpoint: %d\n", backend.MaxConnectionsPerEndpoint)
-							}
+							fmt.Printf("    CapacityScaler: %f\n", backend.CapacityScaler)
 						}
 					}
 				}
 			}
+			fmt.Println("========== Intended Backends END ==========")
 			if len(upsert.backends) > 0 {
 				err = b.updateBackends(upsert.name, upsert.region, newSvc, forceCapacity)
 			}
